@@ -7,8 +7,9 @@ defmodule SqlSpCache.Application do
     import Supervisor.Spec, warn: false
 
     children = [
+      supervisor(SqlSpCache.Cache.Supervisor, []),
       worker(Registry, [:unique, SqlSpCache.Registry.Cache]),
-      worker(SqlSpCache.Server, []),      
+      worker(SqlSpCache.Server, []),
     ]
 
     opts = [strategy: :one_for_one, name: SqlSpCache.Supervisor]
