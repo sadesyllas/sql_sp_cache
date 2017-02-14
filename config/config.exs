@@ -29,5 +29,24 @@ use Mix.Config
 #
 #     import_config "#{Mix.env}.exs"
 
+logger_level = if Mix.env === :prod, do: :info, else: :debug
+
+config :logger,
+  backends: [:console],
+  compile_time_purge_level: logger_level,
+  utc_log: true
+
+config :logger, :console,
+  level: logger_level
+
 config :sql_sp_cache, SqlSpCache.Server,
-  port: 4416
+  port: 4416,
+  receive_timeout: 5_000
+
+config :sql_sp_cache, SqlSpCache.DB,
+  db_connection_string: "DRIVER={SQL Server};SERVER=;UID=;PWD=;DATABASE=",
+  db_query_timeout: 5_000,
+  db_reconnection_delay: 500
+
+config :sql_sp_cache, SqlSpCache.Cache.Cleaner,
+  cleaning_interval: 10_000

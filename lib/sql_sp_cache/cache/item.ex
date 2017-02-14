@@ -3,5 +3,5 @@ defmodule SqlSpCache.Cache.Item do
 
   alias SqlSpCache.Server.Request
 
-  defstruct request: %Request{}, key: "", data: nil, timestamp: 0, listeners: []
+  defstruct request: %Request{}, key: "", data: nil, timestamp: 0, last_updated: nil, poll_scheduled: false
 end

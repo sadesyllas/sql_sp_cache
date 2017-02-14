@@ -4,11 +4,13 @@ defmodule SqlSpCache.Cache.Supervisor do
 
   use Supervisor
 
-  def start_link() do
+  def start_link()
+  do
     Supervisor.start_link(@mod, :ok, name: @mod)
   end
 
-  def start_child(cache_name) do
+  def start_child(cache_name)
+  do
     cache =
       case Supervisor.start_child(@mod, [%{name: cache_name}]) do
         {:ok, cache} -> cache
@@ -17,7 +19,8 @@ defmodule SqlSpCache.Cache.Supervisor do
     {:ok, cache}
   end
 
-  def init(:ok) do
+  def init(:ok)
+  do
     children = [
       worker(SqlSpCache.Cache, [], restart: :transient)
     ]

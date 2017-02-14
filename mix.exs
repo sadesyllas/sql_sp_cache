@@ -11,16 +11,16 @@ defmodule SqlSpCache.Mixfile do
   end
 
   def application do
-    [extra_applications: [:logger],
-     mod: {SqlSpCache.Application, []}]
+    [
+      extra_applications: [:timex, :logger],
+      mod: {SqlSpCache.Application, []},
+    ]
   end
 
   defp deps do
     [
-      {:msgpax, "~> 1.0"},
-      {:ecto, "~> 1.0"},
-      {:tds, "~> 0.5.4"},
-      {:tds_ecto, "~> 1.0"},
+      {:poison, "~> 3.1"},
+      {:timex, "~> 3.1"},
     ]
   end
 end
