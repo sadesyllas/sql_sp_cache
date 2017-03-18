@@ -63,8 +63,8 @@ defmodule SqlSpCache.Server do
           receive_loop(client, receive_timeout)
         {:error, :timeout} ->
           receive_timeout = Application.get_env(:sql_sp_cache, @mod)[:receive_timeout]
-          Logger.debug("timeout of #{receive_timeout}ms elapsed while receiving the request body"
-            <> " from client #{get_client_ip_port(client)}")
+          Logger.debug("timeout of #{receive_timeout}ms elapsed while waiting for data from client"
+            <> " #{get_client_ip_port(client)}")
           :gen_tcp.close(client)
           nil
         error ->

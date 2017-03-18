@@ -153,7 +153,7 @@ defmodule SqlSpCache.DB do
   # parse_db_results
   #
 
-  defp parse_db_results(db_result, params, columns \\ [], rows \\ [], output_values \\ [])
+  defp parse_db_results(db_result, params, columns \\ [], rows \\ [], output_values \\ %{})
 
   defp parse_db_results([], _, columns, rows, output_values)
   do
@@ -188,18 +188,25 @@ defmodule SqlSpCache.DB do
     Enum.reverse(acc)
   end
 
+  # here datum should be the name of a column
   defp data_to_binary([datum | data], acc) when is_list(datum)
   do
     data_to_binary(data, [to_string(datum) | acc])
   end
 
-  # here datum should be a tuple
+  # here datum should be a tuple representing a row of data
   defp data_to_binary([datum | data], acc)
   do
-    datum = Enum.map(Tuple.to_list(datum), fn datum ->
-      case datum do
-        datum when is_list(datum) -> to_string(datum)
-        _ -> datum
+    datum = Enum.map(Tuple.to_list(datum), fn datum_part ->
+      case datum_part do
+        datum_part when is_list(datum_part) ->
+          to_string(datum_part)
+        datum_part when is_binary(datum_part) ->
+          datum_part |> String.split("", trim: true) |> Enum.filter(&String.printable?/1) |> to_string()
+        {{year, month, day}, {hour, minute, second}} ->
+          "#{year}-#{month}-#{day}T#{hour}:#{minute}:#{second}Z"
+        _ ->
+          datum_part
       end
     end)
     data_to_binary(data, [datum | acc])
