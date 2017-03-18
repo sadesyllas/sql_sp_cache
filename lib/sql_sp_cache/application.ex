@@ -15,6 +15,7 @@ defmodule SqlSpCache.Application do
       worker(SqlSpCache.Push, []),
       worker(SqlSpCache.Cache.Listeners, []),
       worker(SqlSpCache.Cache.Registry, []),
+      worker(SqlSpCache.Cache.NameRegistry, []),
       worker(SqlSpCache.Cache.Cleaner, []),
       worker(SqlSpCache.Server, []),
     ]

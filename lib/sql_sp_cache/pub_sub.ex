@@ -28,9 +28,9 @@ defmodule SqlSpCache.PubSub do
   end
 
   defmodule Topics do
-    def cache_clean()
+    def cache_clean_up()
     do
-      :pub_sub_topic_cache_clean
+      :pub_sub_topic_cache_clean_up
     end
 
     def client_disconnected()

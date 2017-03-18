@@ -18,18 +18,21 @@ defmodule SqlSpCache.Server.Request do
   """
   defstruct token: "", sp: "", params: [], expire: 0, poll: 0
 
+  def from_map(%{"sp" => ":" <> _command = sp} = request)
+  do
+    %@mod{
+      sp: sp,
+      params: map_params(request["params"] || [])
+    }
+  end
+
   def from_map(%{"sp" => sp, "expire" => expire} = request)
     when sp != nil and expire != nil
   do
     %@mod{
       token: request["token"] || nil,
       sp: sp,
-      params: Enum.map(request["params"] || [], fn param -> %{
-        name: param["name"],
-        type: param["type"],
-        direction: param["direction"],
-        value: param["value"],
-      } end),
+      params: map_params(request["params"] || []),
       expire: expire || 0,
       poll: request["poll"] || 0
     }
@@ -38,5 +41,15 @@ defmodule SqlSpCache.Server.Request do
   def from_map(request)
   do
     %@mod{sp: "_INVALID_: #{inspect(request)}"}
+  end
+
+  defp map_params(params)
+  do
+    Enum.map(params, fn param -> %{
+      name: param["name"],
+      type: param["type"],
+      direction: param["direction"],
+      value: param["value"],
+    } end)
   end
 end

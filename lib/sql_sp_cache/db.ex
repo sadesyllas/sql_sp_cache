@@ -17,16 +17,18 @@ defmodule SqlSpCache.DB do
 
   def execute_sp({%CacheItem{} = _item, _client} = item_client)
   do
-    GenServer.cast(@mod, {:execute_sp, {item_client, self()}})
+    db_backoff_base = Application.get_env(:sql_sp_cache, @mod)[:db_backoff_base]
+    GenServer.cast(@mod, {:execute_sp, {item_client, self()}, db_backoff_base})
   end
 
-  def handle_cast({:execute_sp, {item_client, reply_to}}, state)
+  def handle_cast({:execute_sp, {item_client, reply_to}, db_backoff_value}, state)
   do
-    spawn(fn -> do_execute_sp(item_client, reply_to) end)
+    spawn_link(fn -> do_execute_sp(item_client, reply_to, db_backoff_value) end)
     {:noreply, state}
   end
 
-  defp do_execute_sp({%{request: %ServerRequest{params: params} = server_request}, _client} = item_client, reply_to)
+  defp do_execute_sp(
+    {%{request: %ServerRequest{params: params} = server_request}, _client} = item_client, reply_to, db_backoff_value)
   do
     query = server_request |> get_query_from_server_request()
     case SQL.query(query) do
@@ -36,7 +38,7 @@ defmodule SqlSpCache.DB do
       {:error, _} = error ->
         send(reply_to, {:db_fetch, {item_client, error}})
       {:error_retry, _} ->
-        GenServer.cast(@mod, {:execute_sp, {item_client, reply_to}})
+        self_cast_after(item_client, reply_to, db_backoff_value)
     end
   end
 
@@ -53,6 +55,26 @@ defmodule SqlSpCache.DB do
       output_params |> Enum.map(fn param -> param <> " OUTPUT" end) |> Enum.join(", "),
       (if length(output_params) === 0, do: "", else: "; SELECT " <> Enum.join(output_params, ", "))
     ])
+  end
+
+  defp self_cast_after(item_client, reply_to, db_backoff_value)
+  do
+    db_backoff_base = Application.get_env(:sql_sp_cache, @mod)[:db_backoff_base]
+    db_backoff_step = Application.get_env(:sql_sp_cache, @mod)[:db_backoff_step]
+    db_backoff_max = Application.get_env(:sql_sp_cache, @mod)[:db_backoff_max]
+    db_backoff_value_new = db_backoff_step.(db_backoff_value)
+    db_backoff_value_new =
+      case db_backoff_value_new > db_backoff_max do
+        true -> db_backoff_base
+        false -> db_backoff_value_new
+      end
+    spawn_link(fn ->
+      receive do
+        :_ -> nil
+      after
+        db_backoff_value_new -> GenServer.cast(@mod, {:execute_sp, {item_client, reply_to}, db_backoff_value_new})
+      end
+    end)
   end
 
   #
@@ -130,8 +152,11 @@ defmodule SqlSpCache.DB do
           rescue
             _ -> Base.encode64(row_datum)
           end
-        {{year, month, day}, {hour, minute, second, millisecond}} ->
-          "#{year}-#{month}-#{day}T#{hour}:#{minute}:#{second}.#{millisecond}Z"
+        {{_year, _month, _day} = year_month_day, {hour, minute, second, microsecond}} ->
+          {year_month_day, {hour, minute, second}}
+          |> Timex.to_datetime(:utc)
+          |> Timex.shift(microseconds: microsecond)
+          |> Timex.format!("{YYYY}-{0M}-{0D}T{h24}:{0m}:{0s}{ss}Z")
         _ ->
           row_datum
       end

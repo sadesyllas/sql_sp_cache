@@ -29,28 +29,40 @@ use Mix.Config
 #
 #     import_config "#{Mix.env}.exs"
 
-logger_level = if Mix.env === :prod, do: :info, else: :debug
+logger_level = if Mix.env() === :prod, do: :info, else: :debug
+
+logs_base_path = Path.join([__DIR__, "..", "logs", Atom.to_string(Mix.env())])
 
 config :logger,
-  backends: [:console],
+  backends: [:console, {LoggerFileBackend, logger_level}],
   compile_time_purge_level: logger_level,
   utc_log: true
 
 config :logger, :console,
   level: logger_level
 
+config :logger, logger_level,
+  path: Path.join(logs_base_path, Atom.to_string(logger_level) <> ".log"),
+  level: logger_level
+
 config :sql_sp_cache, SqlSpCache.Server,
   port: 4416,
-  receive_timeout: 5_000,
+  receive_timeout: 60_000,
   log_heartbeats: false
+
+config :sql_sp_cache, SqlSpCache.DB,
+  db_backoff_base: 50,
+  db_backoff_step: &(2 * &1),
+  db_backoff_max: 5_000
 
 config :sql_sp_cache, SqlSpCache.DB.SQL,
   adapter: Tds.Ecto,
   hostname: "",
+  port: 0,
   username: "",
   password: "",
   database: "",
-  db_query_timeout: 5_000
+  db_query_timeout: 10_000
 
 config :sql_sp_cache, SqlSpCache.Cache.Cleaner,
-  cleaning_interval: 10_000
+  clean_up_interval: 60_000

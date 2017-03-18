@@ -3,7 +3,7 @@ defmodule SqlSpCache.Mixfile do
 
   def project do
     [app: :sql_sp_cache,
-     version: "0.1.0",
+     version: "1.0.0",
      elixir: "~> 1.4-rc",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
@@ -19,10 +19,11 @@ defmodule SqlSpCache.Mixfile do
 
   defp deps do
     [
+      {:ecto, "~> 1.1", override: true},
+      {:logger_file_backend, "~> 0.0.9"},
+      {:poison, "~> 2.0"},
       {:tds, git: "https://github.com/StoiximanServices/tds.git", override: true},
       {:tds_ecto, git: "https://github.com/StoiximanServices/tds_ecto.git", override: true},
-      {:ecto, "~> 1.1", override: true},
-      {:poison, "~> 2.0"},
       {:timex, "~> 3.1"},
     ]
   end

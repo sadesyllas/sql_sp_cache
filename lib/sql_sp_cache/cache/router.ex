@@ -8,8 +8,15 @@ defmodule SqlSpCache.Cache.Router do
   alias SqlSpCache.Cache.Supervisor, as: CacheSupervisor
   alias SqlSpCache.Cache.Item, as: CacheItem
   alias SqlSpCache.Cache
+  alias SqlSpCache.Command
 
-  def send_to_cache(%Request{} = request, client)
+  def route(%Request{sp: ":" <> command, params: params} = request, client)
+  do
+    Logger.debug("Received command #{command} from #{inspect(client)} in request #{inspect(request)}")
+    :gen_tcp.send(client, Command.execute(command, params))
+  end
+
+  def route(%Request{} = request, client)
   do
     cache_name = get_cache_name(request)
     cache_key = get_cache_key(request)
@@ -27,7 +34,19 @@ defmodule SqlSpCache.Cache.Router do
 
   defp get_cache_key(%Request{token: token, sp: sp, params: params})
   do
-    Base.encode64((token || "") <> sp <> inspect(params))
+    String.trim(token || "")
+    <> ":"
+    <> String.trim(sp)
+    <> ":"
+    <> (
+      params
+      |> Enum.map(fn param ->
+        String.trim(param.name)
+        <> (if param.direction == "OUTPUT", do: "", else: "=")
+        <> (param.value |> to_string() |> String.trim())
+      end)
+      |> Enum.join(":")
+    )
   end
 
   defp log_cache_route(request, cache_name, cache_key)

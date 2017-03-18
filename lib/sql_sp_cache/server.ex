@@ -68,6 +68,7 @@ defmodule SqlSpCache.Server do
           receive_timeout = Application.get_env(:sql_sp_cache, @mod)[:receive_timeout]
           Logger.debug("timeout of #{receive_timeout}ms elapsed while waiting for data from client"
             <> " #{get_client_ip_port(client)}")
+          CacheListeners.remove_client(client)
           :gen_tcp.close(client)
           nil
         error ->
@@ -96,7 +97,7 @@ defmodule SqlSpCache.Server do
 
   defp handle_request(%CacheRequest{} = request, client)
   do
-    Router.send_to_cache(request, client)
+    Router.route(request, client)
   end
 
   defp get_client_ip_port(client)

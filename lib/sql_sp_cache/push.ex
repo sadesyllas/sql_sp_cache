@@ -3,8 +3,10 @@ defmodule SqlSpCache.Push do
   @mod __MODULE__
 
   require Logger
+
   use GenServer
-  use Bitwise
+
+  import SqlSpCache.Utilities
 
   alias SqlSpCache.Server.Response, as: ServerResponse
   alias SqlSpCache.Cache.Listeners, as: CacheListeners
@@ -26,6 +28,17 @@ defmodule SqlSpCache.Push do
     Logger.debug("pushing to single client #{inspect(client)}"
       <> " with data #{inspect(server_response) |> String.slice(0, 2048)}")
     GenServer.cast(@mod, {:push_single_client, {client, server_response}})
+  end
+
+  def get_push_queue_length()
+  do
+    GenServer.call(@mod, :get_push_queue_length)
+  end
+
+  def handle_call(:get_push_queue_length, _from, state)
+  do
+    push_queue_length = :erlang.process_info(self()) |> Keyword.get(:messages) |> length()
+    {:reply, push_queue_length, state}
   end
 
   def handle_cast({:push, {cache_key, client, server_response}}, state)
@@ -84,17 +97,5 @@ defmodule SqlSpCache.Push do
     {:ok, payload} = server_response |> ServerResponse.to_serializable() |> Poison.encode()
     payload_header = get_data_header(payload)
     payload_header <> payload
-  end
-
-  defp get_data_header(nil)
-  do
-    get_data_header(<<>>)
-  end
-
-  defp get_data_header(data)
-  do
-    byte_count = byte_size(data)
-    [&(&1 >>> 24), &(&1 >>> 16), &(&1 >>> 8), &(&1 &&& 255)]
-    |> Enum.reduce(<<>>, fn to_byte_value, data_header -> data_header <> <<to_byte_value.(byte_count)>> end)
   end
 end

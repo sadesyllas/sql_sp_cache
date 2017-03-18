@@ -11,11 +11,12 @@ defmodule SqlSpCache.Cache.Registry do
 
   def get_via!(name)
   do
-    {:via, Registry, {@mod, name}}
+    {:via, Registry, {@mod, String.trim(name)}}
   end
 
   def get_pid!({:via, Registry, {@mod, name}})
   do
+    name = String.trim(name)
     case Registry.lookup(@mod, name) do
       [{pid, _}] ->
         pid
