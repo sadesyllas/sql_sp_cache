@@ -202,7 +202,15 @@ defmodule SqlSpCache.DB do
         datum_part when is_list(datum_part) ->
           to_string(datum_part)
         datum_part when is_binary(datum_part) ->
-          datum_part |> String.split("", trim: true) |> Enum.filter(&String.printable?/1) |> to_string()
+          datum_part_converted = :unicode.characters_to_binary(datum_part, {:utf16, :little}, :utf8)
+          try do
+            case String.printable?(datum_part_converted) do
+              true -> datum_part_converted
+              false -> Base.encode64(datum_part)
+            end
+          rescue
+            _ -> Base.encode64(datum_part)
+          end
         {{year, month, day}, {hour, minute, second}} ->
           "#{year}-#{month}-#{day}T#{hour}:#{minute}:#{second}Z"
         _ ->
