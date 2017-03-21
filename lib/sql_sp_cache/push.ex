@@ -17,13 +17,14 @@ defmodule SqlSpCache.Push do
   def push(cache_key, client, %ServerResponse{} = server_response)
   do
     Logger.debug("pushing key #{inspect(cache_key)} to clients (current client: #{inspect(client)})"
-      <> " with data #{inspect(server_response)}")
+      <> " with data #{inspect(server_response) |> String.slice(0, 2048)}")
     GenServer.cast(@mod, {:push, {cache_key, client, server_response}})
   end
 
   def push_single_client(client, %ServerResponse{} = server_response)
   do
-    Logger.debug("pushing to single client #{inspect(client)} with data #{inspect(server_response)}")
+    Logger.debug("pushing to single client #{inspect(client)}"
+      <> " with data #{inspect(server_response) |> String.slice(0, 2048)}")
     GenServer.cast(@mod, {:push_single_client, {client, server_response}})
   end
 

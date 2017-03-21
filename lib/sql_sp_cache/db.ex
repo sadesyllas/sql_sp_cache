@@ -32,21 +32,36 @@ defmodule SqlSpCache.DB do
   do
     spawn(fn ->
       result =
-        with {:ok, db} <- db_connection_string |> to_charlist() |> :odbc.connect([]) do
-          result = do_execute_sp(db, item.request)
-          :odbc.disconnect(db)
-          result
-        else
-          {:error, error} ->
-            error = IO.iodata_to_binary(error)
-            Logger.error("error while executing sp: #{error}")
-            {:error, error}
+        try do
+          with {:ok, db} <- db_connection_string |> to_charlist() |> :odbc.connect(binary_strings: :on) do
+            result = do_execute_sp(db, item.request)
+            :odbc.disconnect(db)
+            result
+          else
+            {:error, error} ->
+              error = to_string(error)
+              Logger.error("error while executing sp: #{error}")
+              {:error, error}
+            error ->
+              error = inspect(error)
+              Logger.error("error while executing sp: #{error}")
+              {:error, error}
+          end
+        catch
+          :exit, error ->
+            Logger.error("caught error while executing sp: #{inspect(error)}")
+            GenServer.cast(@mod, {:execute_sp, {item_client, reply_to}})
+            :halt
+        rescue
           error ->
-            error = inspect(error)
-            Logger.error("error while executing sp: #{error}")
-            {:error, error}
+            Logger.debug("rescued error while executing sp: #{inspect(error)}")
+            GenServer.cast(@mod, {:execute_sp, {item_client, reply_to}})
+            :halt
         end
-      send(reply_to, {:db_fetch, {item_client, result}})
+      case result do
+        :halt -> nil
+        _ -> send(reply_to, {:db_fetch, {item_client, result}})
+      end
     end)
     {:noreply, state}
   end
@@ -202,14 +217,15 @@ defmodule SqlSpCache.DB do
         datum_part when is_list(datum_part) ->
           to_string(datum_part)
         datum_part when is_binary(datum_part) ->
-          datum_part_converted = :unicode.characters_to_binary(datum_part, {:utf16, :little}, :utf8)
-          try do
-            case String.printable?(datum_part_converted) do
-              true -> datum_part_converted
-              false -> Base.encode64(datum_part)
-            end
-          rescue
-            _ -> Base.encode64(datum_part)
+          with {:error, _} <- :unicode.characters_to_binary(datum_part, {:utf16, :little}, :utf8) do
+            Base.encode64(datum_part)
+          else
+            datum_part_converted ->
+              with {:ok, _} <- Poison.encode(datum_part_converted) do
+                datum_part_converted
+              else
+                _ -> Base.encode64(datum_part)
+              end
           end
         {{year, month, day}, {hour, minute, second}} ->
           "#{year}-#{month}-#{day}T#{hour}:#{minute}:#{second}Z"
