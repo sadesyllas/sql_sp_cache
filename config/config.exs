@@ -41,7 +41,8 @@ config :logger, :console,
 
 config :sql_sp_cache, SqlSpCache.Server,
   port: 4416,
-  receive_timeout: 5_000
+  receive_timeout: 5_000,
+  log_heartbeats: false
 
 config :sql_sp_cache, SqlSpCache.DB,
   db_connection_string: "DRIVER={SQL Server};SERVER=;UID=;PWD=;DATABASE=",

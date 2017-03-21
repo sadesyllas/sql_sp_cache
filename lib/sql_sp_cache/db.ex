@@ -11,7 +11,7 @@ defmodule SqlSpCache.DB do
 
   def start_link(db_connection_string)
   do
-    :odbc.start(:transient)
+    :odbc.start()
     GenServer.start_link(@mod, db_connection_string, name: @mod)
   end
 

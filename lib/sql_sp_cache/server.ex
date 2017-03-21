@@ -59,7 +59,9 @@ defmodule SqlSpCache.Server do
         receive_loop(client, receive_timeout)
       else
         :heartbeat ->
-          Logger.debug("received heartbeat from client #{get_client_ip_port(client)}")
+          if Application.get_env(:sql_sp_cache, @mod)[:log_heartbeats] do
+            Logger.debug("received heartbeat from client #{get_client_ip_port(client)}")
+          end
           receive_loop(client, receive_timeout)
         {:error, :timeout} ->
           receive_timeout = Application.get_env(:sql_sp_cache, @mod)[:receive_timeout]
