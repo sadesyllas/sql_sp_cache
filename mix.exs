@@ -19,7 +19,10 @@ defmodule SqlSpCache.Mixfile do
 
   defp deps do
     [
-      {:poison, "~> 3.1"},
+      {:tds, git: "https://github.com/StoiximanServices/tds.git", override: true},
+      {:tds_ecto, git: "https://github.com/StoiximanServices/tds_ecto.git", override: true},
+      {:ecto, "~> 1.1", override: true},
+      {:poison, "~> 2.0"},
       {:timex, "~> 3.1"},
     ]
   end

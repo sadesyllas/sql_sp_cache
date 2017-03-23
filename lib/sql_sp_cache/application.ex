@@ -8,10 +8,11 @@ defmodule SqlSpCache.Application do
     import Supervisor.Spec, warn: false
 
     children = [
+      supervisor(SqlSpCache.DB.SQL, []),
       supervisor(SqlSpCache.Cache.Supervisor, []),
+      worker(SqlSpCache.DB, []),
       worker(SqlSpCache.PubSub, []),
       worker(SqlSpCache.Push, []),
-      worker(SqlSpCache.DB, [Application.get_env(:sql_sp_cache, SqlSpCache.DB)[:db_connection_string]]),
       worker(SqlSpCache.Cache.Listeners, []),
       worker(SqlSpCache.Cache.Registry, []),
       worker(SqlSpCache.Cache.Cleaner, []),

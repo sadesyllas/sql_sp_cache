@@ -6,13 +6,13 @@ defmodule SqlSpCache.DB do
 
   use GenServer
 
+  alias SqlSpCache.DB.SQL
   alias SqlSpCache.Cache.Item, as: CacheItem
   alias SqlSpCache.Server.Request, as: ServerRequest
 
-  def start_link(db_connection_string)
+  def start_link()
   do
-    :odbc.start()
-    GenServer.start_link(@mod, db_connection_string, name: @mod)
+    GenServer.start_link(@mod, :ok, name: @mod)
   end
 
   def execute_sp({%CacheItem{} = _item, _client} = item_client)
@@ -20,103 +20,23 @@ defmodule SqlSpCache.DB do
     GenServer.cast(@mod, {:execute_sp, {item_client, self()}})
   end
 
-  def init(db_connection_string)
+  def handle_cast({:execute_sp, {item_client, reply_to}}, state)
   do
-#    Process.send_after(self(), :connect, 5) # TODO: restore
-    {:ok, %{db_connection_string: db_connection_string}}
-  end
-
-  def handle_cast(
-    {:execute_sp, {{item, _client} = item_client, reply_to}},
-    %{db_connection_string: db_connection_string} = state)
-  do
-    spawn(fn ->
-      result =
-        try do
-          with {:ok, db} <- db_connection_string |> to_charlist() |> :odbc.connect(binary_strings: :on) do
-            result = do_execute_sp(db, item.request)
-            :odbc.disconnect(db)
-            result
-          else
-            {:error, error} ->
-              error = to_string(error)
-              Logger.error("error while executing sp: #{error}")
-              {:error, error}
-            error ->
-              error = inspect(error)
-              Logger.error("error while executing sp: #{error}")
-              {:error, error}
-          end
-        catch
-          :exit, error ->
-            Logger.error("caught error while executing sp: #{inspect(error)}")
-            GenServer.cast(@mod, {:execute_sp, {item_client, reply_to}})
-            :halt
-        rescue
-          error ->
-            Logger.debug("rescued error while executing sp: #{inspect(error)}")
-            GenServer.cast(@mod, {:execute_sp, {item_client, reply_to}})
-            :halt
-        end
-      case result do
-        :halt -> nil
-        _ -> send(reply_to, {:db_fetch, {item_client, result}})
-      end
-    end)
+    spawn(fn -> do_execute_sp(item_client, reply_to) end)
     {:noreply, state}
   end
 
-#  def handle_cast({:execute_sp, {{item, _client} = item_client, reply_to}}, %{db: db} = state)
-#  do
-#    result = do_execute_sp(db, item.request)
-#    send(reply_to, {:db_fetch, {item_client, result}})
-#    {:noreply, state}
-#  end
-#
-#  def handle_info(:connect, %{db_connection_string: db_connection_string} = state)
-#  do
-#    new_state =
-#      case db_connection_string |> to_charlist() |> :odbc.connect([]) do
-#        {:ok, db} ->
-#          Map.put(state, :db, db)
-#        {:error, :connection_closed} ->
-#          Logger.warn("db connection has been closed and will be reopened")
-#          Process.send_after(@mod, :connect, Application.get_env(:sql_sp_cache, @mod)[:db_reconnection_delay])
-#          state
-#        {:error, error} ->
-#          Logger.error("db connection error: #{error}")
-#          state
-#      end
-#    {:noreply, new_state}
-#  end
-
-  def handle_info(info, state)
+  defp do_execute_sp({%{request: %ServerRequest{params: params} = server_request}, _client} = item_client, reply_to)
   do
-    Logger.debug("received unhandled db info message #{inspect(info)}")
-    {:noreply, state}
-  end
-
-  defp do_execute_sp(db, %ServerRequest{params: params} = server_request)
-  do
-    query =
-      server_request
-      |> get_query_from_server_request()
-      |> to_charlist()
-    timeout = Application.get_env(:sql_sp_cache, @mod)[:db_query_timeout]
-#    receive do '_____' -> nil after 10_000 -> nil end # TODO: remove
-    case :odbc.sql_query(db, query, timeout) do # TODO: restore
-#    case [{:selected, ['x', 'y'], [{1, round(abs(:rand.normal()))}]}, {:selected, [[]], [{0}]}] do # TODO: remove
-      {:selected, _, _} = db_result ->
-        {:ok, parse_db_results([db_result], params)}
-      [{:selected, _, _} | _] = db_results ->
-        {:ok, parse_db_results(db_results, params)}
-      {:error, error} ->
-        error = to_string(error)
-        Logger.error("an error occurred during sp execution: #{error} (#{inspect(server_request)})")
-        {:error, error}
-      error ->
-        Logger.error("an error occurred during sp execution: #{inspect(error)} (#{inspect(server_request)})")
-        {:error, error}
+    query = server_request |> get_query_from_server_request()
+    case SQL.query(query) do
+      {:ok, data} ->
+        data = parse_db_results(data, params)
+        send(reply_to, {:db_fetch, {item_client, {:ok, data}}})
+      {:error, _} = error ->
+        send(reply_to, {:db_fetch, {item_client, error}})
+      {:error_retry, _} ->
+        GenServer.cast(@mod, {:execute_sp, {item_client, reply_to}})
     end
   end
 
@@ -175,65 +95,48 @@ defmodule SqlSpCache.DB do
     %{columns: columns, rows: rows, output_values: output_values}
   end
 
-  defp parse_db_results([{:selected, [[]], output_value_data} | rest_db_results], params, columns, rows, _)
+  defp parse_db_results([%{columns: ["" | _], rows: [output_values]} | rest_db_results], params, columns, rows, _)
   do
-    parse_db_results(
-      rest_db_results,
-      params,
-      columns,
-      rows,
-      output_value_data |> data_to_binary() |> output_values_to_map(params))
+    parse_db_results(rest_db_results, params, columns, rows, output_values_to_map(output_values, params))
   end
 
-  defp parse_db_results([{:selected, column_names, row_data} | rest_db_results], params, columns, rows, output_values)
+  defp parse_db_results([%{columns: cols, rows: rs} | rest_db_results], params, columns, rows, output_values)
   do
-    column_names = data_to_binary(column_names)
-    row_data = data_to_binary(row_data)
-    parse_db_results(rest_db_results, params, columns ++ [column_names], rows ++ [row_data], output_values)
+    parse_db_results(rest_db_results, params, columns ++ [cols], rows ++ [normalize_row_data(rs)], output_values)
   end
 
   #
-  # data_to_binary
+  # normalize_row_data
   #
 
-  defp data_to_binary(data, acc \\ [])
+  defp normalize_row_data(rows, acc \\ [])
 
-  defp data_to_binary([], acc)
+  defp normalize_row_data([], acc)
   do
     Enum.reverse(acc)
   end
 
-  # here datum should be the name of a column
-  defp data_to_binary([datum | data], acc) when is_list(datum)
+  defp normalize_row_data([row | rest_rows], acc)
   do
-    data_to_binary(data, [to_string(datum) | acc])
-  end
-
-  # here datum should be a tuple representing a row of data
-  defp data_to_binary([datum | data], acc)
-  do
-    datum = Enum.map(Tuple.to_list(datum), fn datum_part ->
-      case datum_part do
-        datum_part when is_list(datum_part) ->
-          to_string(datum_part)
-        datum_part when is_binary(datum_part) ->
-          with {:error, _} <- :unicode.characters_to_binary(datum_part, {:utf16, :little}, :utf8) do
-            Base.encode64(datum_part)
-          else
-            datum_part_converted ->
-              with {:ok, _} <- Poison.encode(datum_part_converted) do
-                datum_part_converted
-              else
-                _ -> Base.encode64(datum_part)
-              end
+    row = Enum.map(row, fn row_datum ->
+      case row_datum do
+        row_datum when is_binary(row_datum) ->
+          try do
+            with {:ok, _} <- Poison.encode(row_datum) do
+              row_datum
+            else
+              _ -> Base.encode64(row_datum)
+            end
+          rescue
+            _ -> Base.encode64(row_datum)
           end
-        {{year, month, day}, {hour, minute, second}} ->
-          "#{year}-#{month}-#{day}T#{hour}:#{minute}:#{second}Z"
+        {{year, month, day}, {hour, minute, second, millisecond}} ->
+          "#{year}-#{month}-#{day}T#{hour}:#{minute}:#{second}.#{millisecond}Z"
         _ ->
-          datum_part
+          row_datum
       end
     end)
-    data_to_binary(data, [datum | acc])
+    normalize_row_data(rest_rows, [row | acc])
   end
 
   defp output_values_to_map(output_values, params)

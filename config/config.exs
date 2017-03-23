@@ -44,10 +44,13 @@ config :sql_sp_cache, SqlSpCache.Server,
   receive_timeout: 5_000,
   log_heartbeats: false
 
-config :sql_sp_cache, SqlSpCache.DB,
-  db_connection_string: "DRIVER={SQL Server};SERVER=;UID=;PWD=;DATABASE=",
-  db_query_timeout: 5_000,
-  db_reconnection_delay: 500
+config :sql_sp_cache, SqlSpCache.DB.SQL,
+  adapter: Tds.Ecto,
+  hostname: "",
+  username: "",
+  password: "",
+  database: "",
+  db_query_timeout: 5_000
 
 config :sql_sp_cache, SqlSpCache.Cache.Cleaner,
   cleaning_interval: 10_000
