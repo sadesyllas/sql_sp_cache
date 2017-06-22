@@ -28,3 +28,5 @@ logs
 
 VSCode
 .vscode
+
+.elixir_ls
