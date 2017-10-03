@@ -12,13 +12,12 @@ defmodule SqlSpCache.Command do
   def execute(command, params \\ nil)
   do
     command = command |> String.trim() |> String.downcase()
-    case Map.has_key?(commands(), command) do
-      true ->
-        Logger.debug("received command #{command}")
-        commands()[command].(params)
-      false ->
-        Logger.error("received invalid command #{command}")
-        nil
+    if Map.has_key?(commands(), command) do
+      Logger.debug("received command #{command}")
+      commands()[command].(params)
+    else
+      Logger.error("received invalid command #{command}")
+      nil
     end
   end
 

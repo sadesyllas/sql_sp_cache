@@ -128,22 +128,21 @@ defmodule SqlSpCache.Cache.Listeners do
   do
     client_cache_keys = client_cache_key[client]
     {existing_client?, new_state} =
-      case client_cache_keys != nil && MapSet.member?(client_cache_keys, cache_key) do
-        true ->
-          {true, state}
-        false ->
-          cache_key_clients_once = cache_key_client_once[cache_key]
-          {existing_client?, cache_key_client_once_new} =
-            case cache_key_clients_once do
-              nil ->
-                {false, Map.put(cache_key_client_once, cache_key, MapSet.put(MapSet.new(), client))}
-              _ ->
-                existing_client? = MapSet.member?(cache_key_clients_once, client)
-                cache_key_client_once_new = Map.put(
-                  cache_key_client_once, cache_key, MapSet.put(cache_key_clients_once, client))
-                {existing_client?, cache_key_client_once_new}
-            end
-          {existing_client?, %{state | cache_key_client_once: cache_key_client_once_new}}
+      if client_cache_keys != nil && MapSet.member?(client_cache_keys, cache_key) do
+        {true, state}
+      else
+        cache_key_clients_once = cache_key_client_once[cache_key]
+        {existing_client?, cache_key_client_once_new} =
+          case cache_key_clients_once do
+            nil ->
+              {false, Map.put(cache_key_client_once, cache_key, MapSet.put(MapSet.new(), client))}
+            _ ->
+              existing_client? = MapSet.member?(cache_key_clients_once, client)
+              cache_key_client_once_new = Map.put(
+                cache_key_client_once, cache_key, MapSet.put(cache_key_clients_once, client))
+              {existing_client?, cache_key_client_once_new}
+          end
+        {existing_client?, %{state | cache_key_client_once: cache_key_client_once_new}}
       end
     {:reply, {existing_client?, new_state}, new_state}
   end

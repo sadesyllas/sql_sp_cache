@@ -64,9 +64,10 @@ defmodule SqlSpCache.DB do
     db_backoff_max = Application.get_env(:sql_sp_cache, @mod)[:db_backoff_max]
     db_backoff_value_new = db_backoff_step.(db_backoff_value)
     db_backoff_value_new =
-      case db_backoff_value_new > db_backoff_max do
-        true -> db_backoff_base
-        false -> db_backoff_value_new
+      if db_backoff_value_new > db_backoff_max do
+        db_backoff_base
+      else
+        db_backoff_value_new
       end
     spawn_link(fn ->
       receive do

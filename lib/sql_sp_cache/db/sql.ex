@@ -1,4 +1,5 @@
 defmodule SqlSpCache.DB.SQL do
+  @moduledoc false
   @mod __MODULE__
 
   use Ecto.Repo, otp_app: :sql_sp_cache

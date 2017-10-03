@@ -3,8 +3,8 @@ defmodule SqlSpCache.Mixfile do
 
   def project do
     [app: :sql_sp_cache,
-     version: "1.0.0",
-     elixir: "~> 1.4-rc",
+     version: "1.1.0",
+     elixir: "~> 1.5",
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
      deps: deps()]

@@ -97,18 +97,17 @@ defmodule SqlSpCache.Cache do
   do
     new_state = clean_up(state)
     private_cache_keys_count = Enum.count(@private_cache_keys, fn key -> Map.has_key?(new_state, key) end)
-    cond do
-      # _keep_alive_ is not true
-      !new_state[:_keep_alive_]
+    if !new_state[:_keep_alive_]
+    and (Map.size(new_state) - private_cache_keys_count) <= 0
+    and (self() |> :erlang.process_info() |> Keyword.get(:messages) |> length()) === 0 do
+      # if _keep_alive_ is not true
       # and the cache is empty
-      and (Map.size(new_state) - private_cache_keys_count) <= 0
       # and there are no pending messages to be processed
-      and (:erlang.process_info(self()) |> Keyword.get(:messages) |> length()) === 0 ->
-        # extract name from via tuple
-        Logger.debug("shutting down cache #{state[:_cache_name_] |> elem(2) |> elem(1)}")
-        {:stop, :shutdown, new_state}
-      true ->
-        {:noreply, new_state}
+      # then extract name from via tuple
+      Logger.debug("shutting down cache #{state[:_cache_name_] |> elem(2) |> elem(1)}")
+      {:stop, :shutdown, new_state}
+    else
+      {:noreply, new_state}
     end
   end
 
@@ -129,23 +128,22 @@ defmodule SqlSpCache.Cache do
       nil ->
         db_fetch_update_ignore.(state)
       cache_item ->
-        cond do
+        if item.request.expire <= 0
+        or (
+          cache_item.request.poll <= 0
+          and cache_item.timestamp
+          |> Timex.shift(milliseconds: cache_item.request.expire)
+          |> Timex.before?(Timex.now())
+        ) do
           # if a negative expiration time was requested
-          item.request.expire <= 0
           # or the already cached item is not being polled and has expired
-          or (
-            cache_item.request.poll <= 0
-            and cache_item.timestamp
-            |> Timex.shift(milliseconds: cache_item.request.expire)
-            |> Timex.before?(Timex.now())
-          ) ->
-            CacheListeners.remove_cache_key(item.key)
-            state
-            |> Map.delete(item.key)
-            |> db_fetch_update_ignore.()
-          true ->
-            # update cache item
-            state
+          CacheListeners.remove_cache_key(item.key)
+          state
+          |> Map.delete(item.key)
+          |> db_fetch_update_ignore.()
+        else
+          # update cache item
+          state
         end
     end
   end
@@ -157,19 +155,18 @@ defmodule SqlSpCache.Cache do
       case db_fetch_result do
         {:ok, data} ->
           new_state = put_stats_db_fetch_end(state, success: true)
-          case data != nil && old_cache_item.data != data do
-            true ->
-              new_cache_item = %{old_cache_item | data: data, last_updated: Timex.now()}
-              push(new_cache_item, client)
-              new_state = Map.put(new_state, old_cache_item.key, new_cache_item)
-              old_data_byte_size = gen_byte_size(old_cache_item.data || "")
-              new_data_byte_size = gen_byte_size(data)
-              old_stats = new_state[:_stats_]
-              %{new_state | _stats_:
-                %{old_stats | byte_size: old_stats.byte_size - old_data_byte_size + new_data_byte_size}
-              }
-            false ->
-              new_state
+          if data != nil && old_cache_item.data != data do
+            new_cache_item = %{old_cache_item | data: data, last_updated: Timex.now()}
+            push(new_cache_item, client)
+            new_state = Map.put(new_state, old_cache_item.key, new_cache_item)
+            old_data_byte_size = gen_byte_size(old_cache_item.data || "")
+            new_data_byte_size = gen_byte_size(data)
+            old_stats = new_state[:_stats_]
+            %{new_state | _stats_:
+              %{old_stats | byte_size: old_stats.byte_size - old_data_byte_size + new_data_byte_size}
+            }
+          else
+            new_state
           end
         {:error, error} ->
           new_state = put_stats_db_fetch_end(state, success: false)
@@ -186,20 +183,22 @@ defmodule SqlSpCache.Cache do
     case old_cache_item.data do
       # this is the first time this item enters the cache or a previous fetch has failed to fetch data from the db
       nil ->
-        case old_cache_item.request.expire <= 0 do
+        if old_cache_item.request.expire <= 0 do
           # this item will enter the cache as expired and it will be removed either by the next request
           # or by the cache cleaner
-          true -> new_state
+          new_state
+        else
           # this item will expire in the future so we must schedule it for polling if applicable
-          false -> schedule_item_polling(new_state, item_client)
+          schedule_item_polling(new_state, item_client)
         end
       # we reach this point after polling
       _ ->
         new_state = Map.put(new_state, old_cache_item.key, %{new_cache_item | poll_scheduled: false})
         # is polling still in effect for this key?
-        case old_cache_item.request.poll <= 0 do
-          true -> new_state
-          false -> schedule_item_polling(new_state, item_client)
+        if old_cache_item.request.poll <= 0 do
+          new_state
+        else
+          schedule_item_polling(new_state, item_client)
         end
     end
   end
@@ -213,25 +212,24 @@ defmodule SqlSpCache.Cache do
   do
     cache_item = state[item.key]
     # if polling has been or is about to be scheduled
-    case cache_item.poll_scheduled or item.request.poll > 0 do
-      true ->
-        {existing_client?, _} = CacheListeners.add_once(client, cache_item.key)
-        # if the data is already available and the client has not been already added just send the data to the client
-        if cache_item.data != nil && !existing_client? do
-          push_single_client(cache_item, client)
-        end
+    if cache_item.poll_scheduled or item.request.poll > 0 do
+      {existing_client?, _} = CacheListeners.add_once(client, cache_item.key)
+      # if the data is already available and the client has not been already added just send the data to the client
+      if cache_item.data != nil && !existing_client? do
+        push_single_client(cache_item, client)
+      end
+    else
       # else schedule a one time immediate poll
-      false ->
-        case cache_item.data do
-          nil ->
-            CacheListeners.add_once(client, cache_item.key)
-            cache_pid = CacheRegistry.get_pid!(state[:_cache_name_])
-            Logger.debug("scheduling one time instant poll for item #{cache_item.key} and client #{inspect(client)}"
-              <> " in cache #{inspect(cache_pid)}")
-            Process.send(cache_pid, {:poll, {item, client}}, [])
-          _ ->
-            push_single_client(cache_item, client)
-        end
+      case cache_item.data do
+        nil ->
+          CacheListeners.add_once(client, cache_item.key)
+          cache_pid = CacheRegistry.get_pid!(state[:_cache_name_])
+          Logger.debug("scheduling one time instant poll for item #{cache_item.key} and client #{inspect(client)}"
+            <> " in cache #{inspect(cache_pid)}")
+          Process.send(cache_pid, {:poll, {item, client}}, [])
+        _ ->
+          push_single_client(cache_item, client)
+      end
     end
     # adjust expiration time and polling interval
     %{state | cache_item.key => %{
@@ -251,28 +249,26 @@ defmodule SqlSpCache.Cache do
   do
     cache_item = state[item.key]
     new_state =
-      case cache_item.request.poll > 0 do
-        true ->
-          CacheListeners.add(client, cache_item.key)
-          case CacheListeners.get_clients(cache_item.key) do
-            [] ->
-              Logger.debug("setting poll to 0 for item #{cache_item.key} because no listeners are listening")
-              Map.put(state, cache_item.key, %{cache_item | request: %{cache_item.request | poll: 0}})
-            _ ->
-              case cache_item.poll_scheduled do
-                true ->
-                  Logger.debug("poll has already been scheduled for item #{cache_item.key}")
-                  state
-                false ->
-                  cache_pid = CacheRegistry.get_pid!(state[:_cache_name_])
-                  Logger.debug("scheduling poll at #{cache_item.request.poll}ms for item #{cache_item.key}"
-                    <> " in cache #{inspect(cache_pid)}")
-                  Process.send_after(cache_pid, {:poll, {item, nil}}, cache_item.request.poll)
-                  Map.put(state, cache_item.key, %{cache_item | poll_scheduled: true})
-              end
-          end
-        false ->
-          state
+      if cache_item.request.poll > 0 do
+        CacheListeners.add(client, cache_item.key)
+        case CacheListeners.get_clients(cache_item.key) do
+          [] ->
+            Logger.debug("setting poll to 0 for item #{cache_item.key} because no listeners are listening")
+            Map.put(state, cache_item.key, %{cache_item | request: %{cache_item.request | poll: 0}})
+          _ ->
+            if cache_item.poll_scheduled do
+              Logger.debug("poll has already been scheduled for item #{cache_item.key}")
+              state
+            else
+              cache_pid = CacheRegistry.get_pid!(state[:_cache_name_])
+              Logger.debug("scheduling poll at #{cache_item.request.poll}ms for item #{cache_item.key}"
+                <> " in cache #{inspect(cache_pid)}")
+              Process.send_after(cache_pid, {:poll, {item, nil}}, cache_item.request.poll)
+              Map.put(state, cache_item.key, %{cache_item | poll_scheduled: true})
+            end
+        end
+      else
+        state
       end
     new_state
   end
@@ -321,21 +317,19 @@ defmodule SqlSpCache.Cache do
         or cache_item.timestamp
         |> Timex.shift(milliseconds: expire)
         |> Timex.after?(now)
-      case keep? && cache_key != :_stats_ do
-        true ->
-          new_state = Map.put(new_state, cache_key, cache_item)
-          case is_private_cache_key do
-            true ->
-              new_state
-            false ->
-              new_data_byte_size = gen_byte_size(cache_item.data || "")
-              old_stats = new_state[:_stats_]
-              %{new_state | _stats_:
-                %{old_stats | byte_size: old_stats.byte_size + new_data_byte_size}
-              }
-          end
-        false ->
+      if keep? && cache_key != :_stats_ do
+        new_state = Map.put(new_state, cache_key, cache_item)
+        if is_private_cache_key do
           new_state
+        else
+          new_data_byte_size = gen_byte_size(cache_item.data || "")
+          old_stats = new_state[:_stats_]
+          %{new_state | _stats_:
+            %{old_stats | byte_size: old_stats.byte_size + new_data_byte_size}
+          }
+        end
+      else
+        new_state
       end
     end)
   end
@@ -356,20 +350,19 @@ defmodule SqlSpCache.Cache do
     old_stats = state[:_stats_]
     [timestamp | rest_db_fetch_timestamp_queue] = Enum.reverse(old_stats[:db_fetch_timestamp_queue])
     new_db_fetch_timestamp_queue = Enum.reverse(rest_db_fetch_timestamp_queue)
-    case success do
-      true ->
-        now = Timex.now()
-        new_db_fetch_count = old_stats[:db_fetch_count] + 1
-        new_db_fetch_duration = old_stats[:db_fetch_duration] + Timex.diff(now, timestamp, :milliseconds)
-        new_db_fetch_mean_duration = new_db_fetch_duration / new_db_fetch_count
-        %{state | _stats_: %{old_stats |
-          db_fetch_count: new_db_fetch_count,
-          db_fetch_duration: new_db_fetch_duration,
-          db_fetch_mean_duration: new_db_fetch_mean_duration,
-          db_fetch_timestamp_queue: new_db_fetch_timestamp_queue,
-        }}
-      false ->
-        %{state | stats: %{old_stats | db_fetch_timestamp_queue: new_db_fetch_timestamp_queue}}
+    if success do
+      now = Timex.now()
+      new_db_fetch_count = old_stats[:db_fetch_count] + 1
+      new_db_fetch_duration = old_stats[:db_fetch_duration] + Timex.diff(now, timestamp, :milliseconds)
+      new_db_fetch_mean_duration = new_db_fetch_duration / new_db_fetch_count
+      %{state | _stats_: %{old_stats |
+        db_fetch_count: new_db_fetch_count,
+        db_fetch_duration: new_db_fetch_duration,
+        db_fetch_mean_duration: new_db_fetch_mean_duration,
+        db_fetch_timestamp_queue: new_db_fetch_timestamp_queue,
+      }}
+    else
+      %{state | stats: %{old_stats | db_fetch_timestamp_queue: new_db_fetch_timestamp_queue}}
     end
   end
 end

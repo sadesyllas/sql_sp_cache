@@ -19,14 +19,14 @@ defmodule SqlSpCache.Push do
   def push(cache_key, client, %ServerResponse{} = server_response)
   do
     Logger.debug("pushing key #{inspect(cache_key)} to clients (current client: #{inspect(client)})"
-      <> " with data #{inspect(server_response) |> String.slice(0, 2048)}")
+      <> " with data #{server_response |> inspect() |> String.slice(0, 2048)}")
     GenServer.cast(@mod, {:push, {cache_key, client, server_response}})
   end
 
   def push_single_client(client, %ServerResponse{} = server_response)
   do
     Logger.debug("pushing to single client #{inspect(client)}"
-      <> " with data #{inspect(server_response) |> String.slice(0, 2048)}")
+      <> " with data #{server_response |> inspect() |> String.slice(0, 2048)}")
     GenServer.cast(@mod, {:push_single_client, {client, server_response}})
   end
 
@@ -37,7 +37,7 @@ defmodule SqlSpCache.Push do
 
   def handle_call(:get_push_queue_length, _from, state)
   do
-    push_queue_length = :erlang.process_info(self()) |> Keyword.get(:messages) |> length()
+    push_queue_length = self() |> :erlang.process_info() |> Keyword.get(:messages) |> length()
     {:reply, push_queue_length, state}
   end
 
@@ -45,7 +45,7 @@ defmodule SqlSpCache.Push do
   do
     clients =
       CacheListeners.get_remove_once(cache_key)
-      ++ (CacheListeners.get_clients(cache_key) |> List.delete(client))
+      ++ (cache_key |> CacheListeners.get_clients() |> List.delete(client))
     clients =
       case client do
         nil -> clients

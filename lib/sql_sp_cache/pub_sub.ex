@@ -28,6 +28,8 @@ defmodule SqlSpCache.PubSub do
   end
 
   defmodule Topics do
+    @moduledoc false
+
     def cache_clean_up()
     do
       :pub_sub_topic_cache_clean_up

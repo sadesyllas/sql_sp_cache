@@ -38,56 +38,53 @@ defmodule SqlSpCache.Server do
 
   defp receive_loop(client, receive_timeout)
   do
-    try do
-      with\
-        {:ok, <<x, y>>} <- :gen_tcp.recv(client, 2, receive_timeout),
-        length = Integer.undigits([x, y], 256),
-        true <- length != 0 || :heartbeat,
-        {:ok, data} <- :gen_tcp.recv(client, length, receive_timeout)
-      do
-        case byte_size(data) != 0 do
-          true ->
-            data
-            |> Poison.decode()
-            |> log_request_debug(client)
-            |> elem(1)
-            |> CacheRequest.from_map()
-            |> handle_request(client)
-          false ->
-            nil
+    with\
+      {:ok, <<x, y>>} <- :gen_tcp.recv(client, 2, receive_timeout),
+      length = Integer.undigits([x, y], 256),
+      true <- length != 0 || :heartbeat,
+      {:ok, data} <- :gen_tcp.recv(client, length, receive_timeout)
+    do
+      if byte_size(data) != 0 do
+        data
+        |> Poison.decode()
+        |> log_request_debug(client)
+        |> elem(1)
+        |> CacheRequest.from_map()
+        |> handle_request(client)
+      else
+        nil
+      end
+      receive_loop(client, receive_timeout)
+    else
+      :heartbeat ->
+        log_heartbeats = Application.get_env(:sql_sp_cache, @mod)[:log_heartbeats]
+        if log_heartbeats do
+          Logger.debug("received heartbeat from client #{get_client_ip_port(client)}")
         end
         receive_loop(client, receive_timeout)
-      else
-        :heartbeat ->
-          log_heartbeats = Application.get_env(:sql_sp_cache, @mod)[:log_heartbeats]
-          if log_heartbeats do
-            Logger.debug("received heartbeat from client #{get_client_ip_port(client)}")
-          end
-          receive_loop(client, receive_timeout)
-        {:error, :timeout} ->
-          receive_timeout = Application.get_env(:sql_sp_cache, @mod)[:receive_timeout]
-          Logger.debug("timeout of #{receive_timeout}ms elapsed while waiting for data from client"
-            <> " #{get_client_ip_port(client)}")
-          CacheListeners.remove_client(client)
-          :gen_tcp.close(client)
-          nil
-        error ->
-          error =
-            case error do
-              {:error, error} -> error
-              error -> error
-            end
-          CacheListeners.remove_client(client)
-          :gen_tcp.close(client)
-          Logger.debug("error #{inspect(error)} receiving from client #{get_client_ip_port(client)}")
-          nil
-      end
-    rescue
-      error ->
+      {:error, :timeout} ->
+        receive_timeout = Application.get_env(:sql_sp_cache, @mod)[:receive_timeout]
+        Logger.debug("timeout of #{receive_timeout}ms elapsed while waiting for data from client"
+          <> " #{get_client_ip_port(client)}")
         CacheListeners.remove_client(client)
-        Logger.debug("error #{error.message} receiving from client #{get_client_ip_port(client)}")
+        :gen_tcp.close(client)
+        nil
+      error ->
+        error =
+          case error do
+            {:error, error} -> error
+            error -> error
+          end
+        CacheListeners.remove_client(client)
+        :gen_tcp.close(client)
+        Logger.debug("error #{inspect(error)} receiving from client #{get_client_ip_port(client)}")
         nil
     end
+  rescue
+    error ->
+      CacheListeners.remove_client(client)
+      Logger.debug("error #{error.message} receiving from client #{get_client_ip_port(client)}")
+      nil
   end
 
   defp handle_request(%CacheRequest{sp: "_INVALID_" <> _request_string} = request, client)
@@ -102,7 +99,8 @@ defmodule SqlSpCache.Server do
 
   defp get_client_ip_port(client)
   do
-    :inet.peername(client)
+    client
+    |> :inet.peername()
     |> (fn client_info ->
       with {:ok, {client_ip, client_port}} <- client_info do
         "#{:inet.ntoa(client_ip)}:#{client_port}"

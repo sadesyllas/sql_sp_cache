@@ -1,4 +1,5 @@
 defmodule SqlSpCache.Server.Request do
+  @moduledoc false
   @mod __MODULE__
 
   @doc """
